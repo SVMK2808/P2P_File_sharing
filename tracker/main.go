@@ -62,6 +62,24 @@ func main() {
 		fmt.Printf("Error: Failed to start tracker on %s: %v\n", address, err)
 		os.Exit(1)
 	}
+	
+	// Load persistent state from disk
+	if err := LoadState(); err != nil {
+		fmt.Printf("Warning: Failed to load state: %v\n", err)
+	}
+	
+	// Initialize DHT for tracker-to-tracker sync
+	// Read all tracker addresses from config file
+	trackerPeers := readAllTrackerAddresses(os.Args[1])
+	trackerID := os.Args[2]
+	port := extractPortFromAddress(address)
+	
+	if err := InitTrackerDHT(trackerID, port, trackerPeers); err != nil {
+		fmt.Printf("Warning: Failed to initialize DHT: %v\n", err)
+		fmt.Println("Tracker will operate without DHT sync")
+	} else {
+		fmt.Println("DHT initialized for tracker sync")
+	}
 
 	fmt.Printf("Tracker listening on %s\n", address)
 	fmt.Println("Type 'quit' to stop the tracker")
@@ -94,5 +112,42 @@ func main() {
 	}()
 
 	<-quit
+	
+	// Save state before shutdown
+	fmt.Println("Saving state...")
+	if err := SaveState(); err != nil {
+		fmt.Printf("Error saving state: %v\n", err)
+	}
+	
 	fmt.Println("Tracker stopped.")
 }
+
+// readAllTrackerAddresses reads all tracker addresses from config file
+func readAllTrackerAddresses(configFile string) []string {
+	file, err := os.Open(configFile)
+	if err != nil {
+		return []string{}
+	}
+	defer file.Close()
+	
+	addresses := []string{}
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" && !strings.HasPrefix(line, "#") {
+			addresses = append(addresses, line)
+		}
+	}
+	return addresses
+}
+
+// extractPortFromAddress extracts port number from address ":9000" -> 9000
+func extractPortFromAddress(addr string) int {
+	parts := strings.Split(addr, ":")
+	if len(parts) == 2 {
+		port, _ := strconv.Atoi(parts[1])
+		return port
+	}
+	return 9000 // default
+}
+

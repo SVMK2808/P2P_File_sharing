@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"p2p/common"
+	"path/filepath"
 )
 
 // StartPeerServerWithListener creates a listener and returns it along with the actual address
@@ -63,7 +63,7 @@ type PeerRequest struct {
 
 type PeerResponse struct {
 	Status		string `json:"status"`
-	Data		[]byte `json:"data, omitempty"`
+	Data		[]byte `json:"data,omitempty"`
 }
 
 func handleHandshake(conn net.Conn, req PeerRequest){

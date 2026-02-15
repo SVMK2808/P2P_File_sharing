@@ -12,6 +12,9 @@ func main() {
 	// Load session at startup to restore login state
 	LoadSession()
 	
+	// Load tracker configuration
+	LoadTrackerConfig("tracker_info.txt")
+	
 	cmd := os.Args[1]
 	args := os.Args[2:]
 
