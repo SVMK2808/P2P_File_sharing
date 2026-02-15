@@ -21,6 +21,7 @@ func createUser(args []string) Response {
 	}
 
 	fmt.Printf("A user with username %s has been created. ", args[0])
+	go SaveState() // Persist asynchronously
 	return Response{"ok", "user created"}
 }
 
@@ -38,6 +39,7 @@ func login(args []string) Response {
 	u.Addr = addr
 
 	fmt.Printf("user with username = %s has logged in successfully. ", args[0])
+	go SaveState() // Persist asynchronously
 	return Response{"ok", "logged in"}
 }
 
@@ -58,6 +60,7 @@ func updateAddress(args []string) Response {
 
 	u.Addr = addr
 	fmt.Printf("Updated address for %s to %s\n", user, addr)
+	go SaveState() // Persist asynchronously
 	return Response{"ok", "address updated"}
 }
 
@@ -78,6 +81,7 @@ func createGroup(args []string) Response {
 		Pending: make(map[string]bool),
 	}
 	fmt.Printf("A group with group name = %s and group owner = %s has been created. ", groupID, user)
+	go SaveState() // Persist asynchronously
 	
 	return Response{"ok", map[string]string{
 		"group_id": groupID,
@@ -200,6 +204,8 @@ func uploadFile(args []string) Response {
 		responseData["file_hash"] = fileHash
 		responseData["total_chunks"] = len(chunks)
 	}
+	
+	go SaveState() // Persist asynchronously
 	
 	return Response{"ok", responseData}
 }
