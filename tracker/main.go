@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 func main() {
@@ -68,36 +70,26 @@ func main() {
 		fmt.Printf("Warning: Failed to load state: %v\n", err)
 	}
 	
-	// Initialize DHT for tracker-to-tracker sync
-	// Read all tracker addresses from config file
+	// Initialize DHT for tracker-to-tracker sync in background
+	// (DHT gossip may block waiting for peers, tracker should serve immediately)
 	trackerPeers := readAllTrackerAddresses(os.Args[1])
 	trackerID := os.Args[2]
 	port := extractPortFromAddress(address)
 	
-	if err := InitTrackerDHT(trackerID, port, trackerPeers); err != nil {
-		fmt.Printf("Warning: Failed to initialize DHT: %v\n", err)
-		fmt.Println("Tracker will operate without DHT sync")
-	} else {
-		fmt.Println("DHT initialized for tracker sync")
-	}
-
-	fmt.Printf("Tracker listening on %s\n", address)
-	fmt.Println("Type 'quit' to stop the tracker")
-
-	quit := make(chan bool)
-
-	// Listen for quit command in background
 	go func() {
-		scanner := bufio.NewScanner(os.Stdin)
-		for scanner.Scan() {
-			if scanner.Text() == "quit" {
-				fmt.Println("Tracker shutting down...")
-				ln.Close() // Close listener to unblock Accept()
-				quit <- true
-				return
-			}
+		if err := InitTrackerDHT(trackerID, port, trackerPeers); err != nil {
+			fmt.Printf("Warning: Failed to initialize DHT: %v\n", err)
+			fmt.Println("Tracker will operate without DHT sync")
+		} else {
+			fmt.Println("DHT initialized for tracker sync")
 		}
 	}()
+
+	fmt.Printf("Tracker listening on %s\n", address)
+	fmt.Println("Press Ctrl+C to stop the tracker")
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 
 	// Accept connections in a goroutine
 	go func() {
