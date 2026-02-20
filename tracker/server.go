@@ -40,6 +40,13 @@ func handleConn(conn net.Conn) {
 		resp = listGroups(msg.Args)
 	case "stop_sharing":
 		resp = stopSharing(msg.Args)
+
+	// ── Sync commands from peer trackers ──────────────────────────────────────
+	// These apply state locally without re-broadcasting to prevent loops.
+	case "sync_create_user", "sync_create_group", "sync_join_group",
+		"sync_accept_request", "sync_upload_file", "sync_stop_sharing":
+		resp = applySync(msg.Cmd, msg.Args)
+
 	default:
 		resp = Response{"error", "unkown command"}
 	}

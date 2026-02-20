@@ -70,18 +70,23 @@ func main() {
 		fmt.Printf("Warning: Failed to load state: %v\n", err)
 	}
 	
-	// Initialize DHT for tracker-to-tracker sync in background
-	// (DHT gossip may block waiting for peers, tracker should serve immediately)
-	trackerPeers := readAllTrackerAddresses(os.Args[1])
+	// Initialize TCP broadcast peer list (all trackers except self)
+	allTrackerPeers := readAllTrackerAddresses(os.Args[1])
+	for _, peer := range allTrackerPeers {
+		if peer != address {
+			peerAddrs = append(peerAddrs, peer)
+		}
+	}
+	fmt.Printf("Sync peers: %v\n", peerAddrs)
+
+	// Initialize DHT for failure detection in background
 	trackerID := os.Args[2]
 	port := extractPortFromAddress(address)
-	
 	go func() {
-		if err := InitTrackerDHT(trackerID, port, trackerPeers); err != nil {
+		if err := InitTrackerDHT(trackerID, port, allTrackerPeers); err != nil {
 			fmt.Printf("Warning: Failed to initialize DHT: %v\n", err)
-			fmt.Println("Tracker will operate without DHT sync")
 		} else {
-			fmt.Println("DHT initialized for tracker sync")
+			fmt.Println("DHT initialized for failure detection")
 		}
 	}()
 
