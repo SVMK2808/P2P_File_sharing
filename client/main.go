@@ -339,6 +339,81 @@ func main() {
 		// Run peer server forever
 		AcceptPeerConnections(ln)
 
+
+	case "join_group":
+		// args: [groupID]
+		if len(args) < 1 {
+			fmt.Println("Usage: join_group <groupID>")
+			return
+		}
+		if State.UserID == "" {
+			fmt.Println("Error: Not logged in")
+			return
+		}
+		resp := SendToTracker(Message{
+			Cmd:  "join_group",
+			Args: []string{args[0], State.UserID},
+		})
+		if resp.Status == "ok" {
+			fmt.Printf("✓ Join request sent to group '%s'\n", args[0])
+			fmt.Println("Wait for group owner to accept your request.")
+		} else {
+			fmt.Println(resp)
+		}
+
+	case "list_requests":
+		// args: [groupID]  — only group owner can list
+		if len(args) < 1 {
+			fmt.Println("Usage: list_requests <groupID>")
+			return
+		}
+		if State.UserID == "" {
+			fmt.Println("Error: Not logged in")
+			return
+		}
+		resp := SendToTracker(Message{
+			Cmd:  "list_requests",
+			Args: []string{args[0], State.UserID},
+		})
+		if resp.Status == "ok" {
+			if requests, ok := resp.Data.([]interface{}); ok {
+				if len(requests) == 0 {
+					fmt.Println("No pending requests")
+				} else {
+					fmt.Printf("Pending join requests for '%s':\n", args[0])
+					fmt.Println("──────────────────────────")
+					for i, r := range requests {
+						fmt.Printf("%d. %v\n", i+1, r)
+					}
+					fmt.Println("──────────────────────────")
+				}
+			} else {
+				fmt.Println(resp.Data)
+			}
+		} else {
+			fmt.Println(resp)
+		}
+
+	case "accept_request":
+		// args: [groupID, userID]
+		if len(args) < 2 {
+			fmt.Println("Usage: accept_request <groupID> <userID>")
+			return
+		}
+		if State.UserID == "" {
+			fmt.Println("Error: Not logged in")
+			return
+		}
+		resp := SendToTracker(Message{
+			Cmd:  "accept_requests",
+			Args: []string{args[0], State.UserID, args[1]},
+		})
+		if resp.Status == "ok" {
+			fmt.Printf("✓ Accepted '%s' into group '%s'\n", args[1], args[0])
+		} else {
+			fmt.Println(resp)
+		}
+
 	default:
 		fmt.Printf("{error unknown command: %s}\n", cmd)
 	}
