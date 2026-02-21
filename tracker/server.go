@@ -47,6 +47,13 @@ func handleConn(conn net.Conn) {
 		"sync_accept_request", "sync_upload_file", "sync_stop_sharing":
 		resp = applySync(msg.Cmd, msg.Args)
 
+	// sync_pull: return full state snapshot so a restarted tracker can catch up
+	case "sync_pull":
+		mu.RLock()
+		snap := SyncSnapshot{Users: users, Groups: groups, Files: files}
+		mu.RUnlock()
+		resp = Response{"ok", snap}
+
 	default:
 		resp = Response{"error", "unkown command"}
 	}
