@@ -8,8 +8,9 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"p2p/common"
+	"path/filepath"
+	"time"
 )
 
 // FileInfo represents file metadata from tracker
@@ -23,7 +24,8 @@ type FileInfo struct {
 	Peers       []string    `json:"peers"`
 }
 
-// DownloadFile downloads a file from peers using P2P chunk transfer
+// DownloadFile downloads a file from peers using P2P chunk transfer.
+// Resumable: already-downloaded chunks are skipped on restart.
 func DownloadFile(groupID, fileName, destPath string) error {
 	// 1. Get file info from tracker
 	fileInfo, err := queryFileInfo(groupID, fileName)
@@ -39,15 +41,28 @@ func DownloadFile(groupID, fileName, destPath string) error {
 	fmt.Printf("Total chunks: %d\n", fileInfo.TotalChunks)
 	fmt.Printf("Available peers: %d\n", len(fileInfo.Peers))
 
-	// 2. Download chunks from peers
-	chunks := make([][]byte, fileInfo.TotalChunks)
+	// 2. Prepare local chunk directory (supports resume + final assembly)
+	chunkDir := filepath.Join(ChunksDir, fileInfo.FileHash)
+	if err := os.MkdirAll(chunkDir, 0755); err != nil {
+		return fmt.Errorf("failed to create chunk dir: %v", err)
+	}
 
+	// 3. Download missing chunks — skip those already on disk
+	downloaded := 0
+	skipped := 0
 	for i := 0; i < fileInfo.TotalChunks; i++ {
+		chunkPath := filepath.Join(chunkDir, fmt.Sprintf("chunk_%d.dat", i))
+
+		// Resume: chunk already downloaded in a previous run
+		if _, err := os.Stat(chunkPath); err == nil {
+			skipped++
+			continue
+		}
+
 		// Round-robin peer selection
 		peer := fileInfo.Peers[i%len(fileInfo.Peers)]
-		
 		fmt.Printf("Downloading chunk %d/%d from %s...\n", i+1, fileInfo.TotalChunks, peer)
-		
+
 		chunkData, err := requestChunk(peer, fileInfo.FileHash, i)
 		if err != nil {
 			return fmt.Errorf("failed to download chunk %d: %v", i, err)
@@ -58,17 +73,31 @@ func DownloadFile(groupID, fileName, destPath string) error {
 			return fmt.Errorf("chunk %d hash mismatch", i)
 		}
 
-		chunks[i] = chunkData
+		// Write chunk immediately to disk (makes resume possible on interruption)
+		if err := os.WriteFile(chunkPath, chunkData, 0644); err != nil {
+			return fmt.Errorf("failed to save chunk %d: %v", i, err)
+		}
+		downloaded++
+
+		// Testing: P2P_CHUNK_DELAY=500ms slows download so interruption can be triggered
+		if d := os.Getenv("P2P_CHUNK_DELAY"); d != "" {
+			if delay, err := time.ParseDuration(d); err == nil {
+				time.Sleep(delay)
+			}
+		}
+	} // end for-loop
+
+	if skipped > 0 {
+		fmt.Printf("Resumed: skipped %d already-downloaded chunks\n", skipped)
 	}
+	fmt.Printf("Downloaded %d new chunks. All chunks validated ✓\n", downloaded)
 
-	fmt.Println("All chunks downloaded and validated ✓")
-
-	// 3. Assemble file
-	if err := assembleFile(chunks, destPath); err != nil {
+	// 4. Assemble file from disk chunks
+	if err := assembleFileFromDisk(chunkDir, fileInfo.TotalChunks, destPath); err != nil {
 		return fmt.Errorf("failed to assemble file: %v", err)
 	}
 
-	// 4. Save to local chunks directory
+	// 5. Save metadata for peer serving
 	metadata := &ChunkMetadata{
 		FileName:    fileInfo.FileName,
 		FileSize:    fileInfo.FileSize,
@@ -77,10 +106,8 @@ func DownloadFile(groupID, fileName, destPath string) error {
 		TotalChunks: fileInfo.TotalChunks,
 		Chunks:      fileInfo.Chunks,
 	}
-	
-	if err := saveDownloadedChunks(chunks, metadata); err != nil {
-		fmt.Printf("Warning: failed to save chunks locally: %v\n", err)
-	}
+	metadataJSON, _ := json.MarshalIndent(metadata, "", "  ")
+	os.WriteFile(filepath.Join(chunkDir, "metadata.json"), metadataJSON, 0644)
 
 	return nil
 }
@@ -179,7 +206,7 @@ func validateChunkHash(data []byte, expectedHash string) bool {
 	return actualHash == expectedHash
 }
 
-// assembleFile concatenates chunks and writes to destination
+// assembleFile concatenates chunks and writes to destination (used by upload verification)
 func assembleFile(chunks [][]byte, destPath string) error {
 	file, err := os.Create(destPath)
 	if err != nil {
@@ -193,6 +220,28 @@ func assembleFile(chunks [][]byte, destPath string) error {
 		}
 	}
 
+	return nil
+}
+
+// assembleFileFromDisk reads chunk files from disk in order and writes them to destPath.
+// Used by resumable DownloadFile — chunks are already on disk from prior download steps.
+func assembleFileFromDisk(chunkDir string, totalChunks int, destPath string) error {
+	out, err := os.Create(destPath)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	for i := 0; i < totalChunks; i++ {
+		chunkPath := filepath.Join(chunkDir, fmt.Sprintf("chunk_%d.dat", i))
+		data, err := os.ReadFile(chunkPath)
+		if err != nil {
+			return fmt.Errorf("missing chunk %d: %v", i, err)
+		}
+		if _, err := out.Write(data); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
