@@ -69,7 +69,7 @@ func main() {
 	if err := LoadState(); err != nil {
 		fmt.Printf("Warning: Failed to load state: %v\n", err)
 	}
-	
+
 	// Initialize TCP broadcast peer list (all trackers except self)
 	allTrackerPeers := readAllTrackerAddresses(os.Args[1])
 	for _, peer := range allTrackerPeers {
@@ -78,6 +78,9 @@ func main() {
 		}
 	}
 	fmt.Printf("Sync peers: %v\n", peerAddrs)
+
+	// Catch up on any state missed while this tracker was down
+	go pullStateFromPeers()
 
 	// Initialize DHT for failure detection in background
 	trackerID := os.Args[2]
