@@ -1,0 +1,10 @@
+The quick brown fox jumps over the lazy dog.
+C++ is a powerful language for system-level programming.
+Shells are like bridges between human thoughts and machine execution.
+Kanha guides Arjuna through every war — even those within.
+Let's test this line with the word 'test' in it.
+Randomness brings chaos, but structure brings clarity.
+Another line without any special word.
+This is the final line of a.txt.
+
+Hello people. I'm writing this line to test the code written by Kanha through me. 
