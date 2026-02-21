@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"os"
+	"strings"
 )
 
 const SessionFile = ".p2p_session.json"
@@ -34,6 +36,30 @@ func LoadSession() error {
 	State.ListenAddr = session.ListenAddr
 
 	return nil
+}
+
+// LoadTrackerConfig loads tracker addresses from config file
+func LoadTrackerConfig(path string) {
+	file, err := os.Open(path)
+	if err != nil {
+		// Default to localhost if config not found
+		State.TrackerAddrs = []string{"127.0.0.1:9000"}
+		State.ActiveTrackers = []string{"127.0.0.1:9000"}
+		return
+	}
+	defer file.Close()
+	
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		//Skip empty lines and comments
+		if line != "" && !strings.HasPrefix(line, "#") {
+			State.TrackerAddrs = append(State.TrackerAddrs, line)
+		}
+	}
+	
+	// Initialize active trackers to all configured ones
+	State.ActiveTrackers = State.TrackerAddrs
 }
 
 // SaveSession writes current State to session file
