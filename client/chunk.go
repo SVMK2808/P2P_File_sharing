@@ -58,6 +58,12 @@ func ChunkFile(filePath string) (*ChunkMetadata, error) {
 
 	// Calculate total chunks
 	fileSize := fileInfo.Size()
+
+	// Guard: reject empty files — 0 chunks are meaningless to peers
+	if fileSize == 0 {
+		return nil, fmt.Errorf("cannot upload empty file (0 bytes)")
+	}
+
 	totalChunks := int((fileSize + ChunkSize - 1) / ChunkSize)
 
 	// Calculate file hash
