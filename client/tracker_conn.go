@@ -6,25 +6,30 @@ import (
 	"time"
 )
 
-// SendToTracker tries trackers in order, returns first successful response
+// SendToTracker tries active trackers first, then any remaining known trackers.
+// Returns the first successful response. Fast failover — no re-scan.
 func SendToTracker(msg Message) Response {
-	// Try active trackers first
+	// Build candidate list: active trackers first, then remaining known addresses
+	seen := make(map[string]bool)
+	candidates := make([]string, 0)
 	for _, addr := range State.ActiveTrackers {
+		candidates = append(candidates, addr)
+		seen[addr] = true
+	}
+	for _, addr := range State.TrackerAddrs {
+		if !seen[addr] {
+			candidates = append(candidates, addr)
+		}
+	}
+
+	for _, addr := range candidates {
 		resp, ok := tryTracker(addr, msg)
 		if ok {
 			return resp
 		}
 	}
 	
-	// If all active trackers failed, refresh and try again
-	UpdateActiveTrackers()
-	for _, addr := range State.ActiveTrackers {
-		resp, ok := tryTracker(addr, msg)
-		if ok {
-			return resp
-		}
-	}
-	
+	return Response{"error", "no trackers available"}
 	return Response{"error", "no trackers available"}
 }
 
@@ -64,7 +69,7 @@ func tryTracker(addr string, msg Message) (Response, bool) {
 	}
 	defer conn.Close()
 	
-	conn.SetDeadline(time.Now().Add(2 * time.Second))
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
 	
 	if err := common.Send(conn, msg); err != nil {
 		return Response{}, false

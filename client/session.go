@@ -38,6 +38,8 @@ func LoadSession() error {
 	return nil
 }
 
+
+
 // SaveSession writes current State to session file
 func SaveSession() error {
 	session := SessionData{

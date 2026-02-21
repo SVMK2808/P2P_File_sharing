@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"p2p/common"
+	"path/filepath"
 )
 
 // StartPeerServerWithListener creates a listener and returns it along with the actual address
@@ -62,8 +62,9 @@ type PeerRequest struct {
 }
 
 type PeerResponse struct {
-	Status		string `json:"status"`
-	Data		[]byte `json:"data, omitempty"`
+	Status  string `json:"status"`
+	Data    []byte `json:"data,omitempty"`
+	Bitfield []int `json:"bitfield,omitempty"` // Chunk indices this peer has
 }
 
 func handleHandshake(conn net.Conn, req PeerRequest){
@@ -86,21 +87,35 @@ func handleHandshake(conn net.Conn, req PeerRequest){
 func handleGetPiece(conn net.Conn, req PeerRequest){
 	fileHash := req.FileHash
 	chunkIdx := req.PieceIdx
-	
+
 	// Read chunk file
 	chunkPath := filepath.Join(ChunksDir, fileHash, fmt.Sprintf("chunk_%d.dat", chunkIdx))
 	data, err := os.ReadFile(chunkPath)
 	if err != nil {
-		common.Send(conn, PeerResponse{
-			Status: "error",
-		})
+		common.Send(conn, PeerResponse{Status: "error"})
 		return
 	}
-	
-	common.Send(conn, PeerResponse{
-		Status: "ok",
-		Data: data,
-	})
+
+	common.Send(conn, PeerResponse{Status: "ok", Data: data})
+}
+
+// handleGetBitfield returns the set of chunk indices this peer has for a given file hash.
+func handleGetBitfield(conn net.Conn, req PeerRequest) {
+	chunkDir := filepath.Join(ChunksDir, req.FileHash)
+	entries, err := os.ReadDir(chunkDir)
+	if err != nil {
+		common.Send(conn, PeerResponse{Status: "error"})
+		return
+	}
+
+	bf := make([]int, 0)
+	for _, e := range entries {
+		var idx int
+		if _, err := fmt.Sscanf(e.Name(), "chunk_%d.dat", &idx); err == nil {
+			bf = append(bf, idx)
+		}
+	}
+	common.Send(conn, PeerResponse{Status: "ok", Bitfield: bf})
 }
 
 func handlePeerConn(conn net.Conn){
@@ -114,13 +129,11 @@ func handlePeerConn(conn net.Conn){
 	switch req.Cmd {
 	case "handshake":
 		handleHandshake(conn, req)
-
 	case "get_piece":
 		handleGetPiece(conn, req)
-		
+	case "get_bitfield":
+		handleGetBitfield(conn, req)
 	default:
-		common.Send(conn, PeerResponse{
-			Status: "error",
-		})
+		common.Send(conn, PeerResponse{Status: "error"})
 	}
 }

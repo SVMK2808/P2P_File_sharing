@@ -22,6 +22,7 @@ func createUser(args []string) Response {
 
 	fmt.Printf("A user with username %s has been created. ", args[0])
 	go SaveState() // Persist asynchronously
+	go broadcastToTrackers("sync_create_user", []string{user, pass})
 	return Response{"ok", "user created"}
 }
 
@@ -82,7 +83,7 @@ func createGroup(args []string) Response {
 	}
 	fmt.Printf("A group with group name = %s and group owner = %s has been created. ", groupID, user)
 	go SaveState() // Persist asynchronously
-	
+	go broadcastToTrackers("sync_create_group", []string{groupID, user})
 	return Response{"ok", map[string]string{
 		"group_id": groupID,
 		"owner":    user,
@@ -102,7 +103,7 @@ func joinGroup(args []string) Response {
 	}
 
 	g.Pending[userID] = true
-
+	go broadcastToTrackers("sync_join_group", []string{groupID, userID})
 	return Response{"ok", "request sent to the group"}
 }
 
@@ -119,6 +120,7 @@ func acceptRequest(args []string) Response {
 
 	delete(g.Pending, userID)
 	g.Members[userID] = true
+	go broadcastToTrackers("sync_accept_request", []string{groupID, userID})
 	return Response{"ok", "request accepted successfully"}
 }
 
@@ -191,7 +193,10 @@ func uploadFile(args []string) Response {
 	}
 
 	fmt.Printf("File %s uploaded to group %s by user %s\n", fileName, groupID, userID)
-	
+	if len(args) >= 6 {
+		go broadcastToTrackers("sync_upload_file", args)
+	}
+
 	responseData := map[string]interface{}{
 		"message":   "file uploaded successfully",
 		"file_name": fileName,
@@ -310,9 +315,11 @@ func stopSharing(args []string) Response {
 	if len(file.Owners) == 0 {
 		delete(files, fileKey)
 		fmt.Printf("File %s removed from group %s (no owners left)\n", fileName, groupID)
+		go broadcastToTrackers("sync_stop_sharing", args)
 		return Response{"ok", "file removed from tracker (no owners)"}
 	}
 
 	fmt.Printf("User %s stopped sharing %s in group %s\n", userID, fileName, groupID)
+	go broadcastToTrackers("sync_stop_sharing", args)
 	return Response{"ok", "stopped sharing"}
 }

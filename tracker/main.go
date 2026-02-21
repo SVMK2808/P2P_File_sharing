@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 func main() {
@@ -62,24 +64,40 @@ func main() {
 		fmt.Printf("Error: Failed to start tracker on %s: %v\n", address, err)
 		os.Exit(1)
 	}
+	
+	// Load persistent state from disk
+	if err := LoadState(); err != nil {
+		fmt.Printf("Warning: Failed to load state: %v\n", err)
+	}
 
-	fmt.Printf("Tracker listening on %s\n", address)
-	fmt.Println("Type 'quit' to stop the tracker")
+	// Initialize TCP broadcast peer list (all trackers except self)
+	allTrackerPeers := readAllTrackerAddresses(os.Args[1])
+	for _, peer := range allTrackerPeers {
+		if peer != address {
+			peerAddrs = append(peerAddrs, peer)
+		}
+	}
+	fmt.Printf("Sync peers: %v\n", peerAddrs)
 
-	quit := make(chan bool)
+	// Catch up on any state missed while this tracker was down
+	go pullStateFromPeers()
 
-	// Listen for quit command in background
+	// Initialize DHT for failure detection in background
+	trackerID := os.Args[2]
+	port := extractPortFromAddress(address)
 	go func() {
-		scanner := bufio.NewScanner(os.Stdin)
-		for scanner.Scan() {
-			if scanner.Text() == "quit" {
-				fmt.Println("Tracker shutting down...")
-				ln.Close() // Close listener to unblock Accept()
-				quit <- true
-				return
-			}
+		if err := InitTrackerDHT(trackerID, port, allTrackerPeers); err != nil {
+			fmt.Printf("Warning: Failed to initialize DHT: %v\n", err)
+		} else {
+			fmt.Println("DHT initialized for failure detection")
 		}
 	}()
+
+	fmt.Printf("Tracker listening on %s\n", address)
+	fmt.Println("Press Ctrl+C to stop the tracker")
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 
 	// Accept connections in a goroutine
 	go func() {
@@ -94,5 +112,42 @@ func main() {
 	}()
 
 	<-quit
+	
+	// Save state before shutdown
+	fmt.Println("Saving state...")
+	if err := SaveState(); err != nil {
+		fmt.Printf("Error saving state: %v\n", err)
+	}
+	
 	fmt.Println("Tracker stopped.")
 }
+
+// readAllTrackerAddresses reads all tracker addresses from config file
+func readAllTrackerAddresses(configFile string) []string {
+	file, err := os.Open(configFile)
+	if err != nil {
+		return []string{}
+	}
+	defer file.Close()
+	
+	addresses := []string{}
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" && !strings.HasPrefix(line, "#") {
+			addresses = append(addresses, line)
+		}
+	}
+	return addresses
+}
+
+// extractPortFromAddress extracts port number from address ":9000" -> 9000
+func extractPortFromAddress(addr string) int {
+	parts := strings.Split(addr, ":")
+	if len(parts) == 2 {
+		port, _ := strconv.Atoi(parts[1])
+		return port
+	}
+	return 9000 // default
+}
+
