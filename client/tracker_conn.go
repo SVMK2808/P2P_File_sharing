@@ -28,7 +28,8 @@ func SendToTracker(msg Message) Response {
 			return resp
 		}
 	}
-
+	
+	return Response{"error", "no trackers available"}
 	return Response{"error", "no trackers available"}
 }
 
