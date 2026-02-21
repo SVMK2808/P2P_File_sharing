@@ -10,6 +10,7 @@ import (
 	"os"
 	"p2p/common"
 	"path/filepath"
+	"time"
 )
 
 // FileInfo represents file metadata from tracker
@@ -77,7 +78,14 @@ func DownloadFile(groupID, fileName, destPath string) error {
 			return fmt.Errorf("failed to save chunk %d: %v", i, err)
 		}
 		downloaded++
-	}
+
+		// Testing: P2P_CHUNK_DELAY=500ms slows download so interruption can be triggered
+		if d := os.Getenv("P2P_CHUNK_DELAY"); d != "" {
+			if delay, err := time.ParseDuration(d); err == nil {
+				time.Sleep(delay)
+			}
+		}
+	} // end for-loop
 
 	if skipped > 0 {
 		fmt.Printf("Resumed: skipped %d already-downloaded chunks\n", skipped)
