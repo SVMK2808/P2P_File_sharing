@@ -218,11 +218,23 @@ func uploadFile(args []string) Response {
 func listFiles(args []string) Response {
 	groupID := args[0]
 
+	// Optional membership check: args[1] = requesting userID
+	requestingUser := ""
+	if len(args) >= 2 {
+		requestingUser = args[1]
+	}
+
 	mu.RLock()
 	defer mu.RUnlock()
 
-	if _, ok := groups[groupID]; !ok {
+	g, ok := groups[groupID]
+	if !ok {
 		return Response{"error", "group not found"}
+	}
+
+	// Enforce membership when a userID is supplied
+	if requestingUser != "" && !g.Members[requestingUser] {
+		return Response{"error", "not a member of this group"}
 	}
 
 	var fileList []map[string]interface{}
@@ -322,4 +334,60 @@ func stopSharing(args []string) Response {
 	fmt.Printf("User %s stopped sharing %s in group %s\n", userID, fileName, groupID)
 	go broadcastToTrackers("sync_stop_sharing", args)
 	return Response{"ok", "stopped sharing"}
+}
+
+// leaveGroup removes a member from a group (owner cannot leave)
+func leaveGroup(args []string) Response {
+	if len(args) < 2 {
+		return Response{"error", "leave_group: need groupID, userID"}
+	}
+	groupID, userID := args[0], args[1]
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	g, ok := groups[groupID]
+	if !ok {
+		return Response{"error", "group not found"}
+	}
+	if g.Owner == userID {
+		return Response{"error", "owner cannot leave the group"}
+	}
+	if !g.Members[userID] {
+		return Response{"error", "not a member"}
+	}
+
+	delete(g.Members, userID)
+	fmt.Printf("User %s left group %s\n", userID, groupID)
+	go broadcastToTrackers("sync_leave_group", args)
+	go SaveState()
+	return Response{"ok", "left group"}
+}
+
+// addSeeder registers an additional peer as a chunk owner for a file.
+// Called by the client after successfully downloading a file.
+// args: [groupID, fileName, userID]
+func addSeeder(args []string) Response {
+	if len(args) < 3 {
+		return Response{"error", "add_seeder: need groupID, fileName, userID"}
+	}
+	groupID, fileName, userID := args[0], args[1], args[2]
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	fileKey := groupID + ":" + fileName
+	f, ok := files[fileKey]
+	if !ok {
+		return Response{"error", "file not found"}
+	}
+	if _, isMember := groups[groupID]; !isMember {
+		return Response{"error", "group not found"}
+	}
+
+	f.Owners[userID] = true
+	fmt.Printf("[seeder] %s is now seeding %s in %s\n", userID, fileName, groupID)
+	go broadcastToTrackers("sync_add_seeder", args)
+	go SaveState()
+	return Response{"ok", "registered as seeder"}
 }

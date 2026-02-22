@@ -115,6 +115,33 @@ func applySync(cmd string, args []string) Response {
 		fmt.Printf("[sync] stop_sharing result: %s\n", resp.Status)
 		return Response{"ok", "synced"}
 
+	case "sync_leave_group":
+		if len(args) < 2 {
+			return Response{"error", "sync_leave_group: need groupID, userID"}
+		}
+		groupID, userID := args[0], args[1]
+		mu.Lock()
+		defer mu.Unlock()
+		if g, ok := groups[groupID]; ok {
+			delete(g.Members, userID)
+			fmt.Printf("[sync] %s left group %s\n", userID, groupID)
+		}
+		return Response{"ok", "synced"}
+
+	case "sync_add_seeder":
+		if len(args) < 3 {
+			return Response{"error", "sync_add_seeder: need groupID, fileName, userID"}
+		}
+		groupID, fileName, userID := args[0], args[1], args[2]
+		fileKey := groupID + ":" + fileName
+		mu.Lock()
+		defer mu.Unlock()
+		if f, ok := files[fileKey]; ok {
+			f.Owners[userID] = true
+			fmt.Printf("[sync] %s added as seeder for %s/%s\n", userID, groupID, fileName)
+		}
+		return Response{"ok", "synced"}
+
 	default:
 		return Response{"error", "unknown sync command"}
 	}

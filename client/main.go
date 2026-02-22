@@ -141,7 +141,7 @@ func main() {
 	case "list_files":
 		resp := SendToTracker(Message{
 			Cmd:  "list_files",
-			Args: []string{args[0]},
+			Args: []string{args[0], State.UserID},
 		})
 		
 		if resp.Status == "ok" {
@@ -193,6 +193,14 @@ func main() {
 		}
 
 		fmt.Printf("✓ Download complete: %s\n", destPath)
+
+		// Register as seeder so other peers can download from us
+		if State.UserID != "" {
+			SendToTracker(Message{
+				Cmd:  "add_seeder",
+				Args: []string{groupID, fileName, State.UserID},
+			})
+		}
 
 	case "status":
 		if State.UserID == "" {
@@ -357,6 +365,26 @@ func main() {
 		if resp.Status == "ok" {
 			fmt.Printf("✓ Join request sent to group '%s'\n", args[0])
 			fmt.Println("Wait for group owner to accept your request.")
+		} else {
+			fmt.Println(resp)
+		}
+
+	case "leave_group":
+		// args: [groupID]
+		if len(args) < 1 {
+			fmt.Println("Usage: leave_group <groupID>")
+			return
+		}
+		if State.UserID == "" {
+			fmt.Println("Error: Not logged in")
+			return
+		}
+		resp := SendToTracker(Message{
+			Cmd:  "leave_group",
+			Args: []string{args[0], State.UserID},
+		})
+		if resp.Status == "ok" {
+			fmt.Printf("✓ Left group '%s'\n", args[0])
 		} else {
 			fmt.Println(resp)
 		}

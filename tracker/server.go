@@ -40,11 +40,16 @@ func handleConn(conn net.Conn) {
 		resp = listGroups(msg.Args)
 	case "stop_sharing":
 		resp = stopSharing(msg.Args)
+	case "leave_group":
+		resp = leaveGroup(msg.Args)
+	case "add_seeder":
+		resp = addSeeder(msg.Args)
 
 	// ── Sync commands from peer trackers ──────────────────────────────────────
 	// These apply state locally without re-broadcasting to prevent loops.
 	case "sync_create_user", "sync_create_group", "sync_join_group",
-		"sync_accept_request", "sync_upload_file", "sync_stop_sharing":
+		"sync_accept_request", "sync_upload_file", "sync_stop_sharing",
+		"sync_leave_group", "sync_add_seeder":
 		resp = applySync(msg.Cmd, msg.Args)
 
 	// sync_pull: return full state snapshot so a restarted tracker can catch up

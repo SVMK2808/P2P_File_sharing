@@ -25,7 +25,7 @@ type FileInfo struct {
 	Peers       []string    `json:"peers"`
 }
 
-// DownloadFile downloads a file from peers using P2P chunk transfer (rarest-first).
+// DownloadFile downloads a file from peers using P2P chunk transfer.
 // Resumable: already-downloaded chunks are skipped on restart.
 func DownloadFile(groupID, fileName, destPath string) error {
 	// 1. Get file info from tracker
@@ -42,73 +42,88 @@ func DownloadFile(groupID, fileName, destPath string) error {
 	fmt.Printf("Total chunks: %d\n", fileInfo.TotalChunks)
 	fmt.Printf("Available peers: %d\n", len(fileInfo.Peers))
 
-	// 2. Query each peer for their bitfield → rarity map
-	peerBitfields := getBitfields(fileInfo.Peers, fileInfo.FileHash)
-	order := buildRarityOrder(peerBitfields, fileInfo.TotalChunks)
-	fmt.Printf("Piece selection: rarest-first (queried %d peers)\n", len(peerBitfields))
+	// 2. Prepare local chunk directory (supports resume + final assembly)
+	chunkDir := filepath.Join(ChunksDir, fileInfo.FileHash)
+	if err := os.MkdirAll(chunkDir, 0755); err != nil {
+		return fmt.Errorf("failed to create chunk dir: %v", err)
+	}
 
-	// 3. Download in rarest-first order
+	// 3. Choose chunk download order: rarest-first or sequential (round-robin)
+	var order []int
+	var peerBitfields map[string][]bool // non-nil only in rarest-first mode
 
-		// 1b. Prepare local chunk directory (supports resume + final assembly)
-		chunkDir := filepath.Join(ChunksDir, fileInfo.FileHash)
-		if err := os.MkdirAll(chunkDir, 0755); err != nil {
-			return fmt.Errorf("failed to create chunk dir: %v", err)
+	if os.Getenv("P2P_RAREST_FIRST") != "" {
+		peerBitfields = getBitfields(fileInfo.Peers, fileInfo.FileHash)
+		order = buildRarityOrder(peerBitfields, fileInfo.TotalChunks)
+		fmt.Printf("Piece selection: rarest-first (queried %d peers)\n", len(peerBitfields))
+	} else {
+		order = make([]int, fileInfo.TotalChunks)
+		for i := range order {
+			order[i] = i
+		}
+	}
+
+	// 4. Download missing chunks in chosen order — skip those already on disk
+	downloaded := 0
+	skipped := 0
+	for _, i := range order {
+		chunkPath := filepath.Join(chunkDir, fmt.Sprintf("chunk_%d.dat", i))
+
+		// Resume: chunk already downloaded in a previous run
+		if _, err := os.Stat(chunkPath); err == nil {
+			skipped++
+			continue
 		}
 
-		downloaded := 0
-		skipped := 0
-
-		for _, i := range order {
-			chunkPath := filepath.Join(chunkDir, fmt.Sprintf("chunk_%d.dat", i))
-
-			// Resume: chunk already downloaded in a previous run
-			if _, err := os.Stat(chunkPath); err == nil {
-				skipped++
-				continue
-			}
-
-			// Only pick peers that have this specific chunk
-			qualified := make([]string, 0)
-			for peer, bf := range peerBitfields {
-				// nil bf = old peer that doesn't support get_bitfield; assume it has all chunks
+		// Pick best peer for this chunk
+		var peer string
+		if peerBitfields != nil {
+			// Rarest-first: prefer peers known to have this specific chunk
+			qualified := make([]string, 0, len(peerBitfields))
+			for p, bf := range peerBitfields {
 				if bf == nil || (i < len(bf) && bf[i]) {
-					qualified = append(qualified, peer)
+					qualified = append(qualified, p)
 				}
 			}
-			if len(qualified) == 0 {
-				qualified = fileInfo.Peers
+			if len(qualified) > 0 {
+				peer = qualified[i%len(qualified)]
+			} else {
+				peer = fileInfo.Peers[i%len(fileInfo.Peers)]
 			}
-
-			peer := qualified[i%len(qualified)]
 			fmt.Printf("Downloading chunk %d/%d from %s (rarest-first)...\n", i+1, fileInfo.TotalChunks, peer)
-
-			chunkData, err := requestChunk(peer, fileInfo.FileHash, i)
-			if err != nil {
-				return fmt.Errorf("failed to download chunk %d: %v", i, err)
-			}
-
-			if !validateChunkHash(chunkData, fileInfo.Chunks[i].Hash) {
-				return fmt.Errorf("chunk %d hash mismatch", i)
-			}
-
-			// Write chunk immediately to disk (makes resume possible on interruption)
-			if err := os.WriteFile(chunkPath, chunkData, 0644); err != nil {
-				return fmt.Errorf("failed to save chunk %d: %v", i, err)
-			}
-			downloaded++
-
-			// Testing: P2P_CHUNK_DELAY=500ms slows download so interruption can be triggered
-			if d := os.Getenv("P2P_CHUNK_DELAY"); d != "" {
-				if delay, err := time.ParseDuration(d); err == nil {
-					time.Sleep(delay)
-				}
-			}
-		} // end for-loop
-
-		if skipped > 0 {
-			fmt.Printf("Resumed: skipped %d already-downloaded chunks\n", skipped)
+		} else {
+			peer = fileInfo.Peers[i%len(fileInfo.Peers)]
+			fmt.Printf("Downloading chunk %d/%d from %s...\n", i+1, fileInfo.TotalChunks, peer)
 		}
-		fmt.Printf("Downloaded %d new chunks. All chunks validated ✓\n", downloaded)
+
+		chunkData, err := requestChunk(peer, fileInfo.FileHash, i)
+		if err != nil {
+			return fmt.Errorf("failed to download chunk %d: %v", i, err)
+		}
+
+		if !validateChunkHash(chunkData, fileInfo.Chunks[i].Hash) {
+			return fmt.Errorf("chunk %d hash mismatch", i)
+		}
+
+		// Write chunk immediately to disk (makes resume possible on interruption)
+		if err := os.WriteFile(chunkPath, chunkData, 0644); err != nil {
+			return fmt.Errorf("failed to save chunk %d: %v", i, err)
+		}
+		downloaded++
+
+		// Testing: P2P_CHUNK_DELAY=500ms slows download so interruption can be triggered
+		if d := os.Getenv("P2P_CHUNK_DELAY"); d != "" {
+			if delay, err := time.ParseDuration(d); err == nil {
+				time.Sleep(delay)
+			}
+		}
+	} // end for-loop
+
+	if skipped > 0 {
+		fmt.Printf("Resumed: skipped %d already-downloaded chunks\n", skipped)
+	}
+	fmt.Printf("Downloaded %d new chunks. All chunks validated ✓\n", downloaded)
+
 	// 4. Assemble file from disk chunks
 	if err := assembleFileFromDisk(chunkDir, fileInfo.TotalChunks, destPath); err != nil {
 		return fmt.Errorf("failed to assemble file: %v", err)
@@ -123,7 +138,6 @@ func DownloadFile(groupID, fileName, destPath string) error {
 		TotalChunks: fileInfo.TotalChunks,
 		Chunks:      fileInfo.Chunks,
 	}
-
 	metadataJSON, _ := json.MarshalIndent(metadata, "", "  ")
 	os.WriteFile(filepath.Join(chunkDir, "metadata.json"), metadataJSON, 0644)
 

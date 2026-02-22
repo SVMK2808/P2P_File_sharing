@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"net"
+	"os"
 	"p2p/common"
+	"strings"
 	"time"
 )
 
@@ -29,7 +32,6 @@ func SendToTracker(msg Message) Response {
 		}
 	}
 	
-	return Response{"error", "no trackers available"}
 	return Response{"error", "no trackers available"}
 }
 
@@ -96,4 +98,33 @@ func UpdateActiveTrackers() {
 	}
 	
 	State.ActiveTrackers = active
+}
+
+// LoadTrackerConfig reads tracker addresses from a config file (one address per line).
+// It populates State.TrackerAddrs and probes for responsive ones into State.ActiveTrackers.
+func LoadTrackerConfig(configFile string) {
+	file, err := os.Open(configFile)
+	if err != nil {
+		// Fall back to a default single tracker
+		State.TrackerAddrs = []string{"127.0.0.1:9000"}
+		UpdateActiveTrackers()
+		return
+	}
+	defer file.Close()
+
+	addrs := []string{}
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" && !strings.HasPrefix(line, "#") {
+			addrs = append(addrs, line)
+		}
+	}
+
+	if len(addrs) == 0 {
+		addrs = []string{"127.0.0.1:9000"}
+	}
+
+	State.TrackerAddrs = addrs
+	UpdateActiveTrackers()
 }
