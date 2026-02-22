@@ -145,15 +145,15 @@ func listRequests(args []string) Response {
 
 func uploadFile(args []string) Response {
 	fileName, groupID, userID, fileSize := args[0], args[1], args[2], args[3]
-	
+
 	// New args: fileHash and chunksJSON (optional for backward compatibility)
 	var fileHash string
 	var chunks []Chunk
-	
+
 	if len(args) >= 6 {
 		fileHash = args[4]
 		chunksJSON := args[5]
-		
+
 		// Parse chunks from JSON
 		if err := json.Unmarshal([]byte(chunksJSON), &chunks); err != nil {
 			return Response{"error", "invalid chunk data"}
@@ -204,14 +204,14 @@ func uploadFile(args []string) Response {
 		"file_size": size,
 		"uploader":  userID,
 	}
-	
+
 	if fileHash != "" {
 		responseData["file_hash"] = fileHash
 		responseData["total_chunks"] = len(chunks)
 	}
-	
+
 	go SaveState() // Persist asynchronously
-	
+
 	return Response{"ok", responseData}
 }
 
@@ -255,12 +255,25 @@ func listFiles(args []string) Response {
 	return Response{"ok", fileList}
 }
 
-// getFileInfo returns file metadata including chunks and peer list
+// getFileInfo returns file metadata including chunks and peer list.
+// If args[2] (requesting userID) is provided, membership is enforced.
 func getFileInfo(args []string) Response {
 	groupID, fileName := args[0], args[1]
 
 	mu.RLock()
 	defer mu.RUnlock()
+
+	// Membership check when caller supplies their userID
+	if len(args) >= 3 && args[2] != "" {
+		requestingUser := args[2]
+		g, ok := groups[groupID]
+		if !ok {
+			return Response{"error", "group not found"}
+		}
+		if !g.Members[requestingUser] {
+			return Response{"error", "not a member of this group"}
+		}
+	}
 
 	fileKey := groupID + ":" + fileName
 	file, ok := files[fileKey]

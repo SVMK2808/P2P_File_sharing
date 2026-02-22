@@ -228,11 +228,12 @@ func buildRarityOrder(peerBitfields map[string][]bool, totalChunks int) []int {
 	return indices
 }
 
-// queryFileInfo requests file metadata from tracker
+// queryFileInfo requests file metadata from tracker.
+// State.UserID is included so the tracker can enforce group membership.
 func queryFileInfo(groupID, fileName string) (*FileInfo, error) {
 	resp := SendToTracker(Message{
 		Cmd:  "get_file_info",
-		Args: []string{groupID, fileName},
+		Args: []string{groupID, fileName, State.UserID},
 	})
 
 	if resp.Status != "ok" {
